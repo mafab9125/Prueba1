@@ -11,21 +11,24 @@ if (!apiKey) {
 }
 
 async function testConnection() {
-    console.log("Testing Gemini API connection with v1...");
+    console.log("Testing Gemini API connection with v1, gemini-2.5-flash and JSON...");
     const ai = new GoogleGenAI({ apiKey, apiVersion: "v1" });
 
     try {
-        const response = await ai.models.generateContent({
-            model: "gemini-1.5-flash",
+        const response: any = await (ai.models as any).generateContent({
+            model: "gemini-2.5-flash",
+            generationConfig: {
+                responseMimeType: "application/json"
+            },
             contents: [{
                 role: "user",
-                parts: [{ text: "Hola, responde con 'OK' si recibes este mensaje." }]
+                parts: [{ text: "Responde con un JSON que tenga una llave 'status' con valor 'OK'." }]
             }]
         });
 
         console.log("✅ Response received:", response.text);
-    } catch (error) {
-        console.error("❌ Error during test:", error);
+    } catch (error: any) {
+        console.error("❌ Error during test:", error.message || JSON.stringify(error, null, 2));
     }
 }
 

@@ -19,21 +19,33 @@ const getApiKey = () => {
     return "";
 };
 
+// Utility to clean markdown blocks and parse JSON
+const safeJsonParse = (text: string) => {
+    try {
+        // Remove markdown code blocks if present (```json ... ``` or ``` ...)
+        const cleaned = text.replace(/```(?:json)?\s*([\s\S]*?)\s*```/g, '$1').trim();
+        return JSON.parse(cleaned);
+    } catch (e) {
+        console.error("❌ [IA] Error parseando JSON:", e);
+        console.error("Contenido original:", text);
+        throw new Error("La respuesta de la IA no tiene un formato JSON válido.");
+    }
+};
+
 export const generateAiSummary = async (violations: Violation[]): Promise<string> => {
     const apiKey = getApiKey();
-    // Using version 'v1' explicitly to avoid 404 on v1beta
     const ai = new GoogleGenAI({ apiKey, apiVersion: "v1" });
 
     try {
-        const response = await ai.models.generateContent({
-            model: "gemini-1.5-flash",
+        const result = await (ai.models as any).generateContent({
+            model: "gemini-2.5-flash",
             contents: [{
                 role: "user",
                 parts: [{ text: `Como experto en seguridad de aplicaciones, resume brevemente el estado de estas violaciones detectadas: ${JSON.stringify(violations)}. Proporciona una recomendación de prioridad en español.` }]
             }]
         });
 
-        return response.text || "No se pudo generar el resumen.";
+        return result.text || "No se pudo generar el resumen.";
     } catch (error) {
         console.error("Error calling Gemini API:", error);
         throw new Error("Error al conectar con la IA. Verifica tu API Key.");
@@ -51,68 +63,54 @@ export const performExpertScan = async (
 
     if (!apiKey) {
         onLog("❌ Error: No se detectó GEMINI_API_KEY en el entorno inyectado.");
-        onLog("💡 Acción requerida: Verifica .env.local y reinicia el servidor con 'Ctrl+C' y 'npm run dev'.");
-        throw new Error("API Key faltante: Revisa la consola del desarrollador (F12) para más detalles.");
+        onLog("💡 Acción requerida: Verifica .env.local y reinicia el servidor.");
+        throw new Error("API Key faltante.");
     }
 
-    // Using version 'v1' explicitly to avoid 404 on v1beta
     const ai = new GoogleGenAI({ apiKey, apiVersion: "v1" });
     onProgress(10);
-    onLog("🚀 Iniciando Auditoría de Experto Nivel 300...");
+    onLog("🚀 Iniciando Auditoría de Experto (Modelo 2.5-Flash)...");
 
-    const prompt = `Actúa como un Auditor de Ciberseguridad de Élite y Arquitecto de Sistemas Principal. Tu tarea es realizar un análisis de profundidad "Nivel 300" sobre el código o contexto proporcionado.
+    const prompt = `Actúa como un Auditor de Ciberseguridad de Élite. Realiza un análisis de profundidad sobre:
+      Archivo: ${fileName}
+      Contenido: ${content.substring(0, 20000)}
       
-      CONTENIDO A ANALIZAR: 
-      Nombre: ${fileName}
-      Contenido: ${content.substring(0, 20000)} ${content.length > 20000 ? "...(truncado)" : ""}
-      
-      MODOS SELECCIONADOS: ${modes.length > 0 ? modes.join(', ') : 'Auditoría Integral'}
-      
-      INSTRUCCIONES DE PUNTUACIÓN (ESTRICTO):
-      - Inicia con 100 puntos en Arquitectura y Seguridad.
-      - DEBES RESTAR entre 10 y 25 puntos por cada hallazgo "Crítico" o "Alto".
-      - Si hay un Riesgo Crítico general, los puntajes NO PUEDEN ser 100/100.
-      
-      DIMENSIONES DE ANÁLISIS REQUERIDAS:
-      1. ARQUITECTURA DE DATOS Y FLUJO: Analiza patrones de diseño, acoplamiento, cohesión, gestión de estado y eficiencia.
-      2. SEGURIDAD DE DATOS DE ALTA RIGOR: Identifica falta de saneamiento, exposición de PII, gestión insegura de secretos, y riesgos de inyección (SQL, Prompt Injection, XSS) según OWASP y NIST CSF.
+      MODOS: ${modes.length > 0 ? modes.join(', ') : 'Auditoría Integral'}
       
       FORMATO DE SALIDA (JSON ESTRICTO):
       {
         "classification": "Riesgo Crítico|Alto|Medio|Bajo",
-        "architectureScore": 60,
-        "dataSecurityScore": 45,
-        "description": "Análisis ejecutivo detallado.",
-        "architectureDetails": [{"failure": "string", "impact": "Crítico|Alto|Medio", "location": "string", "snippet": "string"}],
-        "dataSecurityDetails": [{"failure": "string", "impact": "Crítico|Alto|Medio", "location": "string", "snippet": "string"}],
+        "architectureScore": 0-100,
+        "dataSecurityScore": 0-100,
+        "description": "Análisis ejecutivo.",
+        "architectureDetails": [],
+        "dataSecurityDetails": [],
         "findings": [{"file": "string", "policy": "string", "status": "Crítico|Alto|Medio|Informativo", "line": 0, "language": "string", "snippet": "string", "analysis": "string"}]
       }`;
 
     const runAiWithRetry = async (retryCount = 0): Promise<any> => {
         try {
-            onLog(`🔍 Analizando vulnerabilidades y arquitectura [Fase ${retryCount + 1}]...`);
-            onLog(`⏳ Esperando respuesta de los servidores de Google AI...`);
-            console.log("Gemini Prompt:", prompt.substring(0, 500) + "...");
+            onLog(`🔍 Analizando vulnerabilidades [Fase ${retryCount + 1}]...`);
 
-            const result = await ai.models.generateContent({
-                model: "gemini-1.5-flash",
-                config: {
+            const result = await (ai.models as any).generateContent({
+                model: "gemini-2.5-flash",
+                generationConfig: {
                     responseMimeType: "application/json"
                 },
                 contents: [{ role: "user", parts: [{ text: prompt }] }]
             });
 
             const responseText = result.text;
-            console.log("Gemini Response:", responseText);
-            return JSON.parse(responseText || "{}");
+            return safeJsonParse(responseText || "{}");
         } catch (error: any) {
             const msg = (error?.message || "").toLowerCase();
-            const is503 = msg.includes("503") || msg.includes("high demand") || msg.includes("unavailable");
-            if (is503 && retryCount < 3) {
-                const delay = Math.pow(2, retryCount) * 3000;
-                onLog(`⚠️ [!] Alta demanda en Gemini (503). Reintentando en ${delay / 1000}s...`);
-                await new Promise(r => setTimeout(r, delay));
-                return runAiWithRetry(retryCount + 1);
+            if (msg.includes("429") || msg.includes("quota") || msg.includes("503")) {
+                if (retryCount < 3) {
+                    const delay = Math.pow(2, retryCount) * 3000;
+                    onLog(`⚠️ [!] Límite de cuota o alta demanda. Reintentando en ${delay / 1000}s...`);
+                    await new Promise(r => setTimeout(r, delay));
+                    return runAiWithRetry(retryCount + 1);
+                }
             }
             console.error("Gemini Error:", error);
             throw error;
@@ -125,21 +123,14 @@ export const performExpertScan = async (
     // Sanitización
     result.architectureScore = Number(result.architectureScore) || 0;
     result.dataSecurityScore = Number(result.dataSecurityScore) || 0;
-
-    const hasCritical = result.findings?.some((f: any) => f.status === 'Crítico' || f.status === 'Alto');
-    if (hasCritical) {
-        if (result.architectureScore > 80) result.architectureScore = 75;
-        if (result.dataSecurityScore > 80) result.dataSecurityScore = 70;
-    }
-
     result.findings = result.findings?.map((f: any) => ({
         ...f,
-        snippet: f.snippet || "/* Ver análisis del experto para más detalles */",
-        analysis: f.analysis || "Se detectó una vulnerabilidad potencial que requiere revisión manual."
+        snippet: f.snippet || "/* Revisar código fuente */",
+        analysis: f.analysis || "Vulnerabilidad detectada."
     })) || [];
 
     onProgress(100);
-    onLog("✅ Análisis de profundidad completado.");
+    onLog("✅ Análisis completado con éxito.");
 
     return result;
 };
