@@ -39,13 +39,20 @@ export const generateAiSummary = async (violations: Violation[]): Promise<string
     try {
         const result = await (ai.models as any).generateContent({
             model: "gemini-2.5-flash",
+            generationConfig: {
+                responseMimeType: "application/json"
+            },
             contents: [{
                 role: "user",
-                parts: [{ text: `Como experto en seguridad de aplicaciones, resume brevemente el estado de estas violaciones detectadas: ${JSON.stringify(violations)}. Proporciona una recomendación de prioridad en español.` }]
+                parts: [{
+                    text: `Como experto en seguridad de aplicaciones, resume de forma ejecutiva el estado de estas violaciones detectadas: ${JSON.stringify(violations)}. 
+                Proporciona una recomendación de prioridad en español.
+                FORMATO DE SALIDA (JSON): { "summary": "tu resumen aquí" }` }]
             }]
         });
 
-        return result.text || "No se pudo generar el resumen.";
+        const parsed = safeJsonParse(result.text || "{}");
+        return parsed.summary || "No se pudo generar el resumen.";
     } catch (error) {
         console.error("Error calling Gemini API:", error);
         throw new Error("Error al conectar con la IA. Verifica tu API Key.");
