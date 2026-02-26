@@ -22,10 +22,22 @@ const getApiKey = () => {
 // Utility to clean markdown blocks and parse JSON
 const safeJsonParse = (text: string) => {
     try {
-        // Remove markdown code blocks if present (```json ... ``` or ``` ...)
+        // First attempt: direct cleaning of markdown blocks
         const cleaned = text.replace(/```(?:json)?\s*([\s\S]*?)\s*```/g, '$1').trim();
         return JSON.parse(cleaned);
     } catch (e) {
+        // Second attempt: structural extraction of first { and last }
+        try {
+            const firstBrace = text.indexOf('{');
+            const lastBrace = text.lastIndexOf('}');
+            if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+                const structural = text.substring(firstBrace, lastBrace + 1);
+                return JSON.parse(structural);
+            }
+        } catch (e2) {
+            console.error("❌ [IA] Error estructural parseando JSON:", e2);
+        }
+
         console.error("❌ [IA] Error parseando JSON:", e);
         console.error("Contenido original:", text);
         throw new Error("La respuesta de la IA no tiene un formato JSON válido.");
@@ -34,7 +46,7 @@ const safeJsonParse = (text: string) => {
 
 export const generateAiSummary = async (violations: Violation[]): Promise<string> => {
     const apiKey = getApiKey();
-    const ai = new GoogleGenAI({ apiKey, apiVersion: "v1" });
+    const ai = new GoogleGenAI({ apiKey, apiVersion: "v1beta" });
 
     try {
         const result = await (ai.models as any).generateContent({
@@ -85,6 +97,8 @@ export const performExpertScan = async (
       MODOS: ${modes.length > 0 ? modes.join(', ') : 'Auditoría Integral'}
       
       FORMATO DE SALIDA (JSON ESTRICTO):
+      DEBES responder ÚNICAMENTE con un objeto JSON válido.
+      DEBES responder ÚNICAMENTE con un objeto JSON válido.
       {
         "classification": "Riesgo Crítico|Alto|Medio|Bajo",
         "architectureScore": 0-100,
