@@ -1,32 +1,39 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { ScanResult, Violation } from "./types";
 
 const getApiKey = () => {
-    // Vite constants are replaced at build time
+    // Access via process.env as defined in vite.config.ts and per security rules
     // @ts-ignore
-    const viteKey = import.meta.env.VITE_GEMINI_API_KEY;
+    const processKey = process.env.GEMINI_API_KEY;
 
     console.log("DEBUG [IA]: Intentando obtener API Key...");
 
-    if (viteKey && viteKey !== "tu_llave_aqui" && viteKey.startsWith("AIzaSy")) {
-        console.log("✅ DEBUG [IA]: API Key detectada correctamente (", viteKey.substring(0, 8), "...)");
-        return viteKey;
+    if (processKey && processKey !== "tu_llave_aqui" && processKey.startsWith("AIzaSy")) {
+        console.log("✅ DEBUG [IA]: API Key detectada correctamente (", processKey.substring(0, 8), "...)");
+        return processKey;
     }
 
-    console.error("❌ DEBUG [IA]: No se encontró VITE_GEMINI_API_KEY en import.meta.env o es inválida.");
-    console.log("Vite Env Object:", import.meta.env); // Log the whole object for debugging
+    console.error("❌ DEBUG [IA]: No se encontró GEMINI_API_KEY en process.env o es inválida.");
+    console.log("Environment Check:", { hasProcessEnv: typeof process !== 'undefined' && !!process.env });
 
     return "";
 };
 
 export const generateAiSummary = async (violations: Violation[]): Promise<string> => {
     const apiKey = getApiKey();
-    const genAI = new GoogleGenAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    // Using version 'v1' explicitly to avoid 404 on v1beta
+    const ai = new GoogleGenAI({ apiKey, apiVersion: "v1" });
 
     try {
-        const response = await model.generateContent(`Como experto en seguridad de aplicaciones, resume brevemente el estado de estas violaciones detectadas: ${JSON.stringify(violations)}. Proporciona una recomendación de prioridad en español.`);
-        return response.response.text() || "No se pudo generar el resumen.";
+        const response = await ai.models.generateContent({
+            model: "gemini-1.5-flash",
+            contents: [{
+                role: "user",
+                parts: [{ text: `Como experto en seguridad de aplicaciones, resume brevemente el estado de estas violaciones detectadas: ${JSON.stringify(violations)}. Proporciona una recomendación de prioridad en español.` }]
+            }]
+        });
+
+        return response.text || "No se pudo generar el resumen.";
     } catch (error) {
         console.error("Error calling Gemini API:", error);
         throw new Error("Error al conectar con la IA. Verifica tu API Key.");
@@ -43,12 +50,13 @@ export const performExpertScan = async (
     const apiKey = getApiKey();
 
     if (!apiKey) {
-        onLog("❌ Error: No se detectó la API Key en el entorno de la aplicación.");
-        onLog("💡 Acción requerida: Asegúrate de que .env.local contenga VITE_GEMINI_API_KEY y reinicia el servidor con 'Ctrl+C' y 'npm run dev'.");
+        onLog("❌ Error: No se detectó GEMINI_API_KEY en el entorno inyectado.");
+        onLog("💡 Acción requerida: Verifica .env.local y reinicia el servidor con 'Ctrl+C' y 'npm run dev'.");
         throw new Error("API Key faltante: Revisa la consola del desarrollador (F12) para más detalles.");
     }
 
-    const genAI = new GoogleGenAI(apiKey);
+    // Using version 'v1' explicitly to avoid 404 on v1beta
+    const ai = new GoogleGenAI({ apiKey, apiVersion: "v1" });
     onProgress(10);
     onLog("🚀 Iniciando Auditoría de Experto Nivel 300...");
 
@@ -86,18 +94,15 @@ export const performExpertScan = async (
             onLog(`⏳ Esperando respuesta de los servidores de Google AI...`);
             console.log("Gemini Prompt:", prompt.substring(0, 500) + "...");
 
-            const model = genAI.getGenerativeModel({
+            const result = await ai.models.generateContent({
                 model: "gemini-1.5-flash",
-                generationConfig: {
+                config: {
                     responseMimeType: "application/json"
-                }
-            });
-
-            const result = await model.generateContent({
+                },
                 contents: [{ role: "user", parts: [{ text: prompt }] }]
             });
 
-            const responseText = result.response.text();
+            const responseText = result.text;
             console.log("Gemini Response:", responseText);
             return JSON.parse(responseText || "{}");
         } catch (error: any) {

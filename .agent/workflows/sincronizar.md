@@ -1,5 +1,5 @@
 ---
-description: Flujo de trabajo para la sincronización e implementadación 
+description: Flujo de trabajo para la sincronización e implementación
 ---
 
 Paso 1: Verificación de Integridad: Ejecutar git status para asegurar que no hay archivos sensibles sin trackear.
